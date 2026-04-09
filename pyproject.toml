@@ -1,0 +1,60 @@
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[project]
+name = "dermato-rag"
+version = "0.1.0"
+description = "RAG spécialisé en dermatologie pour la synthèse de cours médicaux"
+readme = "README.md"
+requires-python = ">=3.11"
+license = "MIT"
+
+dependencies = [
+    # Framework RAG
+    "langchain>=0.3",
+    "langchain-google-genai",
+    "langchain-mistralai",
+    "langchain-cohere",
+
+    # Embeddings
+    "FlagEmbedding",
+    "sentence-transformers",
+
+    # Vector stores
+    "chromadb",
+    "qdrant-client",
+
+    # Extraction de documents
+    "pymupdf",
+    "ebooklib",
+    "beautifulsoup4",
+    "python-docx",
+
+    # API
+    "fastapi",
+    "uvicorn",
+
+    # Utils
+    "python-dotenv",
+    "langdetect",
+    "pydantic>=2.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest",
+    "pytest-asyncio",
+    "ruff",
+    "ipykernel",
+]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "W"]
+
+[tool.pytest.ini_options]
+testpaths = ["src/tests"]
