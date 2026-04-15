@@ -1,0 +1,138 @@
+import fitz  # pymupdf
+import tiktoken
+from pathlib import Path
+from typing import List, Dict, Any
+import hashlib
+from ..config import config
+
+class PDFIngester:
+    def __init__(self, data_dir: Path = None):
+        self.data_dir = data_dir or config.DATA_DIR
+        self.tokenizer = tiktoken.get_encoding("cl100k_base")  # utilisé pour compter les tokens
+    
+    def extract_text(self, pdf_path: Path) -> List[Dict[str, Any]]:
+        """Extrait le texte et les métadonnées d'un PDF."""
+        doc = fitz.open(pdf_path)
+        pages_text = []
+        for page_num in range(len(doc)):
+            page = doc.load_page(page_num)
+            text = page.get_text("text").strip()
+            if text:
+                pages_text.append({
+                    "text": text,
+                    "page": page_num + 1,
+                    "source": pdf_path.name,
+                    "title": pdf_path.stem
+                })
+        doc.close()
+        return pages_text
+    
+    def chunk_by_paragraphs(self, pages: List[Dict[str, Any]], 
+                            chunk_size: int = None, 
+                            overlap: int = None) -> List[Dict[str, Any]]:
+        """Découpe les pages en chunks par paragraphes, avec contrainte de taille."""
+        chunk_size = chunk_size or config.CHUNK_SIZE
+        overlap = overlap or config.CHUNK_OVERLAP
+        chunks = []
+        chunk_id = 0
+        
+        for page in pages:
+            paragraphs = [p.strip() for p in page["text"].split('\n\n') if p.strip()]
+            current_chunk = []
+            current_tokens = 0
+            
+            for para in paragraphs:
+                para_tokens = len(self.tokenizer.encode(para))
+                # Si le paragraphe seul dépasse chunk_size, on le coupe en morceaux
+                if para_tokens > chunk_size:
+                    # On découpe le paragraphe en phrases
+                    sentences = para.replace('. ', '.\n').split('\n')
+                    for sent in sentences:
+                        sent_tokens = len(self.tokenizer.encode(sent))
+                        if current_tokens + sent_tokens > chunk_size and current_chunk:
+                            chunk_text = '\n\n'.join(current_chunk)
+                            chunks.append({
+                                "text": chunk_text,
+                                "source": page["source"],
+                                "page": page["page"],
+                                "chunk_id": f"{page['source']}_{page['page']}_{chunk_id}",
+                                "title": page["title"]
+                            })
+                            chunk_id += 1
+                            # Garder un overlap
+                            overlap_tokens = 0
+                            overlap_chunk = []
+                            for c in reversed(current_chunk):
+                                c_tokens = len(self.tokenizer.encode(c))
+                                if overlap_tokens + c_tokens <= overlap:
+                                    overlap_chunk.insert(0, c)
+                                    overlap_tokens += c_tokens
+                                else:
+                                    break
+                            current_chunk = overlap_chunk
+                            current_tokens = overlap_tokens
+                        current_chunk.append(sent)
+                        current_tokens += sent_tokens
+                else:
+                    if current_tokens + para_tokens > chunk_size and current_chunk:
+                        chunk_text = '\n\n'.join(current_chunk)
+                        chunks.append({
+                            "text": chunk_text,
+                            "source": page["source"],
+                            "page": page["page"],
+                            "chunk_id": f"{page['source']}_{page['page']}_{chunk_id}",
+                            "title": page["title"]
+                        })
+                        chunk_id += 1
+                        # Overlap
+                        overlap_tokens = 0
+                        overlap_chunk = []
+                        for c in reversed(current_chunk):
+                            c_tokens = len(self.tokenizer.encode(c))
+                            if overlap_tokens + c_tokens <= overlap:
+                                overlap_chunk.insert(0, c)
+                                overlap_tokens += c_tokens
+                            else:
+                                break
+                        current_chunk = overlap_chunk
+                        current_tokens = overlap_tokens
+                    current_chunk.append(para)
+                    current_tokens += para_tokens
+            
+            # Dernier chunk de la page
+            if current_chunk:
+                chunk_text = '\n\n'.join(current_chunk)
+                chunks.append({
+                    "text": chunk_text,
+                    "source": page["source"],
+                    "page": page["page"],
+                    "chunk_id": f"{page['source']}_{page['page']}_{chunk_id}",
+                    "title": page["title"]
+                })
+                chunk_id += 1
+                current_chunk = []
+                current_tokens = 0
+        
+        return chunks
+    
+    def ingest(self) -> List[Dict[str, Any]]:
+        """Ingère tous les PDFs du dossier data_dir."""
+        all_chunks = []
+        pdf_files = list(self.data_dir.glob("*.pdf"))
+        if not pdf_files:
+            raise FileNotFoundError(f"Aucun fichier PDF trouvé dans {self.data_dir}")
+        
+        for pdf_path in pdf_files:
+            print(f"Traitement de {pdf_path.name}...")
+            pages = self.extract_text(pdf_path)
+            chunks = self.chunk_by_paragraphs(pages)
+            all_chunks.extend(chunks)
+            print(f"  -> {len(chunks)} chunks créés.")
+        
+        print(f"Total de {len(all_chunks)} chunks générés.")
+        return all_chunks
+
+if __name__ == "__main__":
+    ingester = PDFIngester()
+    chunks = ingester.ingest()
+    print(f"Exemple du premier chunk:\n{chunks[0]['text'][:200]}...")

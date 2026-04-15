@@ -1,0 +1,261 @@
+"""
+Routes étendues : génération de cours structuré et réflexion thérapeutique.
+Utilise le RAG dermato_rag_v3 (QdrantRetriever singleton) + Mistral pour la
+génération structurée.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import os
+from concurrent.futures import ThreadPoolExecutor
+from typing import List, Optional
+
+import httpx
+from fastapi import APIRouter, HTTPException
+from pydantic import BaseModel
+
+router = APIRouter()
+
+MISTRAL_API_URL = "https://api.mistral.ai/v1/chat/completions"
+_ext_executor = ThreadPoolExecutor(max_workers=2)
+
+
+# ── Clés lues au runtime (après chargement .env par config.py) ───────────────
+
+def _get_mistral_key() -> str:
+    """Lecture lazy — s'assure que config.py a déjà chargé le .env."""
+    from dermato_rag.config import config  # noqa: PLC0415
+    return config.MISTRAL_API_KEY
+
+
+def _get_mistral_model() -> str:
+    return os.getenv("MISTRAL_GENERATE_MODEL", "mistral-medium-latest")
+
+
+# ── Modèles Pydantic ─────────────────────────────────────────────────────────
+
+class CoursRequest(BaseModel):
+    topic: str
+    level: Optional[str] = "DES dermatologie"
+    context_chunks: Optional[int] = 12
+    sections: Optional[List[str]] = None  # Si None, toutes les sections
+
+
+class TherapeutiqueRequest(BaseModel):
+    indication: str
+    context: Optional[str] = ""
+    context_chunks: Optional[int] = 10
+
+
+class CoursResponse(BaseModel):
+    topic: str
+    content: str
+    sources: List[dict]
+    model: str
+
+
+class TherapeutiqueResponse(BaseModel):
+    indication: str
+    content: str
+    sources: List[dict]
+    model: str
+
+
+# ── Helpers ──────────────────────────────────────────────────────────────────
+
+def _rag_query_sync(query: str, top_k: int) -> List[dict]:
+    """Appel synchrone au RAG via le singleton QdrantRetriever."""
+    from dermato_rag.api import get_retriever  # noqa: PLC0415
+    try:
+        retriever = get_retriever()
+        results = retriever.search_with_rerank(
+            query=query,
+            top_k_retrieval=top_k * 3,
+            top_k_rerank=top_k,
+        )
+        return [
+            {
+                "title": r.get("source", "Source inconnue"),
+                "content": r.get("text", "")[:500],
+                "score": round(float(r.get("rerank_score", r.get("score", 0)) or 0), 4),
+            }
+            for r in results
+        ]
+    except Exception as e:
+        print(f"[routes_extended] rag_query error: {e}", flush=True)
+        return []
+
+
+async def call_mistral(system_prompt: str, user_prompt: str) -> str:
+    """Appel asynchrone à l'API Mistral."""
+    api_key = _get_mistral_key()
+    if not api_key:
+        raise HTTPException(status_code=500, detail="MISTRAL_API_KEY non configurée")
+
+    model = _get_mistral_model()
+
+    async with httpx.AsyncClient(timeout=120) as client:
+        resp = await client.post(
+            MISTRAL_API_URL,
+            headers={
+                "Authorization": f"Bearer {api_key}",
+                "Content-Type": "application/json",
+            },
+            json={
+                "model": model,
+                "messages": [
+                    {"role": "system", "content": system_prompt},
+                    {"role": "user", "content": user_prompt},
+                ],
+                "temperature": 0.3,
+                "max_tokens": 4000,
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()["choices"][0]["message"]["content"]
+
+
+def format_sources_for_prompt(sources: List[dict]) -> str:
+    """Formater les sources pour le prompt."""
+    formatted = []
+    for i, s in enumerate(sources, 1):
+        formatted.append(f"[{i}] {s['title']}\n{s['content'][:300]}")
+    return "\n\n".join(formatted)
+
+
+# ── Routes ───────────────────────────────────────────────────────────────────
+
+@router.post("/generate-cours", response_model=CoursResponse)
+async def generate_cours(body: CoursRequest):
+    """
+    Génère un chapitre de cours structuré niveau DES dermato.
+    """
+    loop = asyncio.get_event_loop()
+
+    # RAG en thread (bibliothèque synchrone)
+    sources = await loop.run_in_executor(
+        _ext_executor, _rag_query_sync, body.topic, body.context_chunks
+    )
+    sources_text = format_sources_for_prompt(sources)
+
+    system_prompt = f"""Tu es un expert en dermatologie et oncologie cutanée.
+Tu rédiges des chapitres de cours de niveau {body.level} pour des internes et chefs de clinique.
+
+RÈGLES STRICTES :
+1. FOCALISATION : Tu dois rester STRICTEMENT sur le sujet demandé. Si le sujet est "vismodegib", ne parle pas du sonidegib sauf pour une comparaison succincte. Si le sujet est "mélanome BRAF+", ne dévie pas vers d'autres cancers.
+2. BIBLIOGRAPHIE : Chaque référence ne doit apparaître QU'UNE SEULE FOIS dans la section Références, même si elle est citée plusieurs fois dans le texte. Format : [N] Auteur et al. - Titre - Journal - Année. Ne jamais dupliquer une référence.
+3. CITATIONS : N'utilise que les sources réellement présentes dans le contexte fourni. Ne pas inventer de références. Si une source est citée [N] dans le texte, elle doit exister dans les Références.
+4. STRUCTURE : Introduction → Physiopathologie → Diagnostic/Éligibilité → Efficacité (données cliniques) → Tolérance → Suivi → Conclusion
+5. TABLEAUX : Un seul tableau des essais cliniques clés, sans doublons. Un tableau des recommandations par niveau de preuve.
+6. LONGUEUR : 800-1200 mots. Concis et précis. Pas de redondance.
+7. LANGUE : Français médical précis.
+
+FORMAT DE SORTIE :
+## [Titre]
+### Introduction
+### Physiopathologie et mécanisme d'action
+### Indications et critères d'éligibilité
+### Efficacité clinique
+### Tolérance
+### Suivi
+### Tableau des essais cliniques clés
+| Essai | N | Population | Résultat principal | Année |
+|---|---|---|---|---|
+### Recommandations (niveau de preuve)
+| Situation | Recommandation | Grade |
+|---|---|---|
+### Références (SANS DOUBLONS)
+[1] ...
+[2] ...
+"""
+
+    sections_list = body.sections if body.sections else [
+        "Introduction", "Physiopathologie", "Indications et éligibilité",
+        "Efficacité clinique", "Tolérance", "Suivi",
+        "Tableau des essais cliniques", "Recommandations", "Références"
+    ]
+    sections_str = "\n".join(f"- {s}" for s in sections_list)
+
+    user_prompt = f"""Rédige un chapitre de cours sur : **{body.topic}**
+
+Sections à générer (UNIQUEMENT ces sections, dans cet ordre) :
+{sections_str}
+
+Sources disponibles (cite-les avec [N]) :
+
+{sources_text}
+
+Génère uniquement les sections demandées."""
+
+    content = await call_mistral(system_prompt, user_prompt)
+
+    return CoursResponse(
+        topic=body.topic,
+        content=content,
+        sources=sources,
+        model=_get_mistral_model(),
+    )
+
+
+@router.post("/reflexion-therapeutique", response_model=TherapeutiqueResponse)
+async def reflexion_therapeutique(body: TherapeutiqueRequest):
+    """
+    Génère une réflexion thérapeutique structurée avec niveaux de preuve.
+    """
+    loop = asyncio.get_event_loop()
+
+    query = body.indication
+    if body.context:
+        query += f" {body.context}"
+
+    sources = await loop.run_in_executor(
+        _ext_executor, _rag_query_sync, query, body.context_chunks
+    )
+    sources_text = format_sources_for_prompt(sources)
+
+    system_prompt = """Tu es un oncologue-dermatologue expert en RCP (Réunion de Concertation Pluridisciplinaire).
+Tu structures des réflexions thérapeutiques rigoureuses basées sur les preuves.
+
+RÈGLES :
+- Organise par ligne de traitement (1ère ligne, 2ème ligne, etc.)
+- Pour chaque option : mécanisme d'action, résultats des essais clés [citation], niveau de preuve, tolérance
+- Tableau comparatif des options thérapeutiques
+- Mentionner les critères de choix (profil patient, biomarqueurs, comorbidités)
+- Algorithme décisionnel en texte structuré
+- Langue : français médical
+- BIBLIOGRAPHIE SANS DOUBLONS : Chaque référence n'apparaît QU'UNE SEULE FOIS dans la section Références. Ne jamais dupliquer.
+- CITATIONS RÉELLES UNIQUEMENT : N'utilise que les sources présentes dans le contexte fourni.
+
+FORMAT :
+## Réflexion thérapeutique : [Indication]
+
+### Contexte clinique
+### Algorithme décisionnel
+### Options thérapeutiques par ligne
+#### Première ligne
+...
+### Tableau comparatif
+| Traitement | Essai pivot | PFS/OS | Réponse | NE | Indication |
+|---|---|---|---|---|---|
+### Points clés pour la RCP
+### Références (SANS DOUBLONS)
+"""
+
+    user_prompt = f"""Indication : **{body.indication}**
+{f"Contexte supplémentaire : {body.context}" if body.context else ""}
+
+Sources disponibles :
+
+{sources_text}
+
+Génère la réflexion thérapeutique complète."""
+
+    content = await call_mistral(system_prompt, user_prompt)
+
+    return TherapeutiqueResponse(
+        indication=body.indication,
+        content=content,
+        sources=sources,
+        model=_get_mistral_model(),
+    )

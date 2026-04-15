@@ -1,0 +1,834 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- v=04101052 -->
+  <meta http-equiv="Cache-Control" content="no-cache, no-store, must-revalidate">
+  <meta http-equiv="Pragma" content="no-cache">
+  <meta http-equiv="Expires" content="0">
+  <title>DermatoRAG — Générateur de Cours Médical</title>
+<style>
+  :root {
+    --dark-blue: #1a2744;
+    --blue-mid: #243358;
+    --blue-light: #2d4070;
+    --gold: #c9a84c;
+    --gold-light: #e0c57a;
+    --white: #f0f4ff;
+    --gray: #8a9bc0;
+    --bg: #111827;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: 'Segoe UI', system-ui, sans-serif;
+    background: var(--bg);
+    color: var(--white);
+    min-height: 100vh;
+  }
+  header {
+    background: linear-gradient(135deg, var(--dark-blue) 0%, var(--blue-mid) 100%);
+    border-bottom: 2px solid var(--gold);
+    padding: 1.2rem 2rem;
+    display: flex;
+    align-items: center;
+    gap: 1rem;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.4);
+  }
+  .logo {
+    width: 48px; height: 48px;
+    background: var(--gold);
+    border-radius: 12px;
+    display: flex; align-items: center; justify-content: center;
+    font-size: 24px; flex-shrink: 0;
+  }
+  header h1 { font-size: 1.5rem; color: var(--white); }
+  header p { font-size: 0.8rem; color: var(--gray); margin-top: 2px; }
+  main { max-width: 900px; margin: 0 auto; padding: 2rem 1rem; }
+  .card {
+    background: var(--dark-blue);
+    border: 1px solid var(--blue-light);
+    border-radius: 16px;
+    padding: 2rem;
+    margin-bottom: 1.5rem;
+    box-shadow: 0 8px 32px rgba(0,0,0,0.3);
+  }
+  .card h2 {
+    color: var(--gold);
+    font-size: 1.1rem;
+    margin-bottom: 1.2rem;
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .form-group { margin-bottom: 1.2rem; }
+  label { display: block; font-size: 0.85rem; color: var(--gray); margin-bottom: 0.4rem; }
+  input, select, textarea {
+    width: 100%;
+    background: var(--blue-mid);
+    border: 1px solid var(--blue-light);
+    color: var(--white);
+    padding: 0.75rem 1rem;
+    border-radius: 10px;
+    font-size: 1rem;
+    outline: none;
+    transition: border-color 0.2s;
+    font-family: inherit;
+  }
+  input:focus, select:focus, textarea:focus { border-color: var(--gold); }
+  input::placeholder, textarea::placeholder { color: var(--gray); }
+  select option { background: var(--blue-mid); }
+  textarea { resize: vertical; min-height: 80px; }
+  .collapse-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    user-select: none;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--blue-light);
+    margin-bottom: 0.5rem;
+  }
+  .collapse-toggle .arrow {
+    transition: transform 0.2s;
+    font-size: 0.8rem;
+    color: var(--gold);
+  }
+  .collapse-toggle.open .arrow { transform: rotate(90deg); }
+  .collapse-content { display: none; padding-top: 0.5rem; }
+  .collapse-content.open { display: block; }
+  .checkbox-group { display: flex; flex-wrap: wrap; gap: 0.8rem; margin-bottom: 0.8rem; }
+  .checkbox-item {
+    display: flex; align-items: center; gap: 0.4rem;
+    font-size: 0.85rem; color: var(--white);
+    cursor: pointer;
+  }
+  .checkbox-item input[type=checkbox] {
+    width: 16px; height: 16px;
+    accent-color: var(--gold);
+    cursor: pointer;
+  }
+  .section-checkboxes { display: flex; flex-direction: column; gap: 0.4rem; margin-bottom: 1rem; }
+  .section-checkboxes .checkbox-item { font-size: 0.85rem; }
+  .btn-generate {
+    width: 100%;
+    background: linear-gradient(135deg, var(--gold) 0%, var(--gold-light) 100%);
+    color: var(--dark-blue);
+    border: none;
+    padding: 1rem 2rem;
+    border-radius: 12px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: transform 0.15s, box-shadow 0.15s;
+    display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+  }
+  .btn-generate:hover:not(:disabled) {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 24px rgba(201,168,76,0.3);
+  }
+  .btn-generate:disabled { opacity: 0.6; cursor: not-allowed; transform: none; }
+  .progress-container { display: none; margin-top: 1.5rem; }
+  .progress-bar-bg {
+    background: var(--blue-mid);
+    border-radius: 100px;
+    height: 8px;
+    overflow: hidden;
+    margin-bottom: 0.8rem;
+  }
+  .progress-bar {
+    height: 100%;
+    background: linear-gradient(90deg, var(--gold), var(--gold-light));
+    border-radius: 100px;
+    width: 0%;
+    transition: width 0.5s ease;
+  }
+  .progress-status {
+    color: var(--gray);
+    font-size: 0.85rem;
+    text-align: center;
+    min-height: 1.2em;
+  }
+  .spinner {
+    width: 20px; height: 20px;
+    border: 3px solid rgba(26,39,68,0.4);
+    border-top-color: var(--gold);
+    border-radius: 50%;
+    animation: spin 0.7s linear infinite;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .result-card { display: none; }
+  .stats-row {
+    display: flex; gap: 1rem; flex-wrap: wrap; margin-bottom: 1.5rem;
+  }
+  .stat {
+    background: var(--blue-mid);
+    border-radius: 10px;
+    padding: 0.7rem 1.2rem;
+    text-align: center;
+    flex: 1; min-width: 120px;
+  }
+  .stat-value { font-size: 1.4rem; font-weight: 700; color: var(--gold); }
+  .stat-label { font-size: 0.75rem; color: var(--gray); margin-top: 2px; }
+  .btn-download {
+    display: flex; align-items: center; justify-content: center; gap: 0.6rem;
+    width: 100%;
+    background: var(--dark-blue);
+    border: 2px solid var(--gold);
+    color: var(--gold);
+    padding: 1rem;
+    border-radius: 12px;
+    font-size: 1.1rem;
+    font-weight: 700;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.2s, color 0.2s;
+    margin-bottom: 1rem;
+  }
+  .btn-download:hover { background: var(--gold); color: var(--dark-blue); }
+  .tools-row { display: flex; gap: 0.8rem; flex-wrap: wrap; }
+  .btn-tool {
+    flex: 1; min-width: 180px;
+    background: var(--blue-mid);
+    border: 1px solid var(--blue-light);
+    color: var(--white);
+    padding: 0.8rem 1rem;
+    border-radius: 10px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    transition: border-color 0.2s, background 0.2s;
+    display: flex; align-items: center; justify-content: center; gap: 0.5rem;
+  }
+  .btn-tool:hover { border-color: var(--gold); background: var(--blue-light); }
+  .preview-toggle {
+    background: none;
+    border: 1px solid var(--blue-light);
+    color: var(--gray);
+    padding: 0.5rem 1rem;
+    border-radius: 8px;
+    cursor: pointer;
+    font-size: 0.85rem;
+    margin-bottom: 1rem;
+    margin-top: 0.5rem;
+  }
+  .preview-toggle:hover { border-color: var(--gold); color: var(--gold); }
+  .course-preview {
+    background: var(--blue-mid);
+    border-radius: 12px;
+    padding: 1.5rem;
+    max-height: 500px;
+    overflow-y: auto;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    white-space: pre-wrap;
+    color: #dde4f5;
+    display: none;
+    font-family: Georgia, serif;
+  }
+  .course-preview::-webkit-scrollbar { width: 6px; }
+  .course-preview::-webkit-scrollbar-track { background: var(--dark-blue); }
+  .course-preview::-webkit-scrollbar-thumb { background: var(--blue-light); border-radius: 3px; }
+  .error-box {
+    background: #2d1a1a;
+    border: 1px solid #c0392b;
+    color: #e74c3c;
+    border-radius: 10px;
+    padding: 1rem;
+    margin-top: 1rem;
+    font-size: 0.85rem;
+    display: none;
+  }
+  .modal-overlay {
+    display: none;
+    position: fixed; inset: 0;
+    background: rgba(0,0,0,0.7);
+    z-index: 1000;
+    align-items: center;
+    justify-content: center;
+    padding: 1rem;
+  }
+  .modal-overlay.open { display: flex; }
+  .modal {
+    background: var(--dark-blue);
+    border: 1px solid var(--gold);
+    border-radius: 16px;
+    padding: 2rem;
+    max-width: 700px;
+    width: 100%;
+    max-height: 90vh;
+    overflow-y: auto;
+  }
+  .modal h3 {
+    color: var(--gold);
+    font-size: 1.2rem;
+    margin-bottom: 1.2rem;
+    display: flex; align-items: center; gap: 0.5rem;
+  }
+  .modal-close {
+    float: right;
+    background: none;
+    border: none;
+    color: var(--gray);
+    font-size: 1.2rem;
+    cursor: pointer;
+    margin-top: -0.3rem;
+  }
+  .modal-close:hover { color: var(--white); }
+  .modal textarea {
+    width: 100%;
+    background: var(--blue-mid);
+    border: 1px solid var(--blue-light);
+    color: var(--white);
+    border-radius: 10px;
+    padding: 1rem;
+    font-size: 0.85rem;
+    font-family: monospace;
+    resize: vertical;
+    min-height: 250px;
+    margin-top: 0.8rem;
+  }
+  .modal-actions { display: flex; gap: 0.8rem; margin-top: 1rem; }
+  .btn-modal {
+    flex: 1;
+    background: var(--blue-light);
+    border: 1px solid var(--gold);
+    color: var(--gold);
+    padding: 0.7rem 1rem;
+    border-radius: 8px;
+    font-size: 0.9rem;
+    cursor: pointer;
+    font-weight: 600;
+  }
+  .btn-modal:hover { background: var(--gold); color: var(--dark-blue); }
+  .btn-modal.primary { background: var(--gold); color: var(--dark-blue); border-color: var(--gold); }
+  .btn-modal.primary:hover { background: var(--gold-light); }
+  .evidence-answer {
+    background: var(--blue-mid);
+    border-radius: 10px;
+    padding: 1rem;
+    margin-top: 1rem;
+    font-size: 0.9rem;
+    line-height: 1.7;
+    max-height: 400px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    font-family: Georgia, serif;
+    color: #dde4f5;
+  }
+  .evidence-sources { margin-top: 0.8rem; font-size: 0.8rem; color: var(--gray); }
+  .evidence-sources span {
+    display: inline-block;
+    background: var(--blue-light);
+    border-radius: 4px;
+    padding: 0.2rem 0.5rem;
+    margin: 0.2rem 0.2rem 0.2rem 0;
+    font-size: 0.75rem;
+  }
+  .notebooklm-options { display: flex; flex-direction: column; gap: 0.6rem; margin-top: 1rem; }
+  .nb-option {
+    display: flex; align-items: center; gap: 0.6rem;
+    padding: 0.7rem 1rem;
+    background: var(--blue-mid);
+    border: 1px solid var(--blue-light);
+    border-radius: 8px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .nb-option:hover { border-color: var(--gold); }
+  .nb-option input[type=radio] { accent-color: var(--gold); }
+  .nb-option label {
+    color: var(--white);
+    font-size: 0.9rem;
+    cursor: pointer;
+    margin: 0;
+    flex: 1;
+  }
+  .nb-option .nb-desc { font-size: 0.75rem; color: var(--gray); display: block; }
+  .focus-input { margin-top: 0.8rem; }
+  footer {
+    text-align: center;
+    padding: 2rem;
+    color: var(--gray);
+    font-size: 0.75rem;
+    border-top: 1px solid var(--blue-mid);
+    margin-top: 2rem;
+  }
+  @media (max-width: 600px) {
+    header { padding: 1rem; }
+    header h1 { font-size: 1.2rem; }
+    .card { padding: 1.2rem; }
+    .stats-row { flex-direction: column; }
+  }
+</style>
+</head>
+<body>
+<header>
+  <div class="logo">&#128300;</div>
+  <div>
+    <h1>DermatoRAG</h1>
+    <p>Générateur de cours médical par intelligence artificielle · 85 articles indexés</p>
+  </div>
+</header>
+
+<main>
+  <div class="card">
+    <h2>&#128218; Générer un cours</h2>
+
+    <div class="form-group">
+      <label>Titre du cours</label>
+      <input type="text" id="courseTitle" placeholder="ex: Carcinome Basocellulaire de l'adulte" />
+    </div>
+
+    <div class="form-group">
+      <label>Niveau</label>
+      <select id="level">
+        <option value="DES">DES Dermatologie</option>
+        <option value="ECN">ECN / iECN</option>
+        <option value="Interniste">Interniste / Généraliste</option>
+      </select>
+    </div>
+
+    <div class="collapse-toggle" onclick="toggleCollapse(this)" style="margin-top:1.5rem;">
+      <span class="arrow">&#9654;</span>
+      <span style="color:var(--gold); font-weight:600;">Contenu et format</span>
+    </div>
+    <div class="collapse-content">
+      <div class="form-group">
+        <label>Sections à inclure</label>
+        <div class="section-checkboxes">
+          <div class="checkbox-item"><input type="checkbox" id="s1" checked><label for="s1">Épidémiologie et Introduction</label></div>
+          <div class="checkbox-item"><input type="checkbox" id="s2" checked><label for="s2">Physiopathologie et Génétique</label></div>
+          <div class="checkbox-item"><input type="checkbox" id="s3" checked><label for="s3">Présentation Clinique</label></div>
+          <div class="checkbox-item"><input type="checkbox" id="s4" checked><label for="s4">Diagnostic</label></div>
+          <div class="checkbox-item"><input type="checkbox" id="s5" checked><label for="s5">Traitement</label></div>
+          <div class="checkbox-item"><input type="checkbox" id="s6" checked><label for="s6">Surveillance et Suivi</label></div>
+          <div class="checkbox-item"><input type="checkbox" id="s7" checked><label for="s7">Cas Particuliers</label></div>
+        </div>
+      </div>
+      <div style="display:flex;gap:1rem;flex-wrap:wrap;">
+        <div class="form-group" style="flex:1;min-width:140px;">
+          <label>Niveau de détail</label>
+          <select id="detailLevel">
+            <option value="court">Court (300-500 mots)</option>
+            <option value="standard" selected>Standard (600-900 mots)</option>
+            <option value="exhaustif">Exhaustif (1200-2000 mots)</option>
+          </select>
+        </div>
+        <div class="form-group" style="flex:1;min-width:140px;">
+          <label>Ton</label>
+          <select id="tone">
+            <option value="academique" selected>Académique DES</option>
+            <option value="ecn">ECN bullet points</option>
+            <option value="clinicien">Clinicien pratique</option>
+          </select>
+        </div>
+      </div>
+      <div class="checkbox-group">
+        <div class="checkbox-item"><input type="checkbox" id="keyPoints"><label for="keyPoints">&#128203; Points clés par section</label></div>
+        <div class="checkbox-item"><input type="checkbox" id="clinicalCases"><label for="clinicalCases">&#129963; Cas cliniques (2 Q&amp;A)</label></div>
+        <div class="checkbox-item"><input type="checkbox" id="qcm"><label for="qcm">&#128203; QCM 10 questions</label></div>
+      </div>
+    </div>
+
+    <div class="collapse-toggle" onclick="toggleCollapse(this)">
+      <span class="arrow">&#9654;</span>
+      <span style="color:var(--gold); font-weight:600;">Qualité et sources</span>
+    </div>
+    <div class="collapse-content">
+      <div class="checkbox-group" style="margin-bottom:1rem;">
+        <div class="checkbox-item"><input type="checkbox" id="noRedundancy" checked><label for="noRedundancy">Non-redondance stricte</label></div>
+        <div class="checkbox-item"><input type="checkbox" id="focusTreatment" checked><label for="focusTreatment">Traitement EBM — HR/OS/PFS</label></div>
+      </div>
+      <div class="form-group">
+        <label>Instructions supplémentaires</label>
+        <textarea id="extraInstructions" placeholder="Ex: insister sur les populations à risque, ajouter les recommandations HAS 2024..."></textarea>
+      </div>
+    </div>
+
+    <button class="btn-generate" id="generateBtn" onclick="generateCourse()">
+      <span>&#10024; Générer le cours</span>
+    </button>
+
+    <div class="progress-container" id="progressContainer">
+      <div class="progress-bar-bg">
+        <div class="progress-bar" id="progressBar"></div>
+      </div>
+      <div class="progress-status" id="progressStatus">Initialisation…</div>
+    </div>
+
+    <div class="error-box" id="errorBox"></div>
+  </div>
+
+  <div class="card result-card" id="resultCard">
+    <h2>&#9989; Cours généré</h2>
+    <div class="stats-row" id="statsRow"></div>
+
+    <a class="btn-download" id="downloadBtn" href="#" download>&#128229; Télécharger le PDF</a>
+
+    <div class="tools-row">
+      <button class="btn-tool" onclick="openEvidenceModal()">&#128300; Interroger les sources (EBM)</button>
+      <button class="btn-tool" onclick="openNotebookLModal()">&#128200; Générer prompt NotebookLM</button>
+    </div>
+
+    <button class="preview-toggle" onclick="togglePreview()">&#128065; Aperçu du contenu</button>
+    <div class="course-preview" id="coursePreview"></div>
+  </div>
+</main>
+
+<div class="modal-overlay" id="evidenceModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeEvidenceModal()">&#10005;</button>
+    <h3>&#128300; Interrogation EBM des sources</h3>
+    <p style="font-size:0.85rem;color:var(--gray);margin-bottom:1rem;">Pose une question précise sur une justification thérapeutique. Le système citera les essais cliniques avec leurs résultats chiffrés.</p>
+    <div class="form-group">
+      <label>Question</label>
+      <input type="text" id="evidenceQuestion" placeholder="Ex: Quelle est la justification pour le pembrolizumab en 1ère ligne dans le mélanome avancées ?" />
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal primary" onclick="askEvidence()">Rechercher</button>
+      <button class="btn-modal" onclick="closeEvidenceModal()">Fermer</button>
+    </div>
+    <div id="evidenceResult"></div>
+  </div>
+</div>
+
+<div class="modal-overlay" id="notebooklmModal">
+  <div class="modal">
+    <button class="modal-close" onclick="closeNotebookLModal()">&#10005;</button>
+    <h3>&#128200; Générer un prompt NotebookLM</h3>
+    <div class="notebooklm-options">
+      <div class="nb-option">
+        <input type="radio" name="nbType" value="decision_tree" id="nbTree" checked>
+        <label for="nbTree">Arbre décisionnel<span class="nb-desc">Flowchart thérapeutique pour la prise en charge</span></label>
+      </div>
+      <div class="nb-option">
+        <input type="radio" name="nbType" value="interactive_graph" id="nbGraph">
+        <label for="nbGraph">Graphique de survie interactif<span class="nb-desc">Courbes OS/PFS comparatives entre essais cliniques</span></label>
+      </div>
+      <div class="nb-option">
+        <input type="radio" name="nbType" value="timeline" id="nbTimeline">
+        <label for="nbTimeline">Timeline des essais pivots<span class="nb-desc">Chronologie des études et approbations réglementaires</span></label>
+      </div>
+    </div>
+    <div class="focus-input form-group">
+      <label>Focus (optionnel)</label>
+      <input type="text" id="nbFocus" placeholder="Ex: traitement de première ligne, mélanome métastatique..." />
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal primary" onclick="generateNotebookLMPrompt()">Générer le prompt</button>
+      <button class="btn-modal" onclick="closeNotebookLModal()">Fermer</button>
+    </div>
+    
+
+<div id="notebooklmResult"></div>
+  </div>
+</div>
+
+
+        <!-- ═══ Visualisation Directe ═══ -->
+        <div class="section-header" style="margin-top:1rem;">
+            <h2 style="font-size:1.1rem;color:var(--gold);">&#128200; Visualisation IA</h2>
+            <p style="font-size:0.85rem;color:var(--gray);margin-top:0.25rem;">Génère directement des prompts pour créer des arbres décisionnels, graphiques et timelines via NotebookLM</p>
+        </div>
+
+        <div style="display:grid;grid-template-columns:1fr 1fr 1fr;gap:0.75rem;margin-top:0.75rem;">
+            <button class="btn-tool" style="padding:0.75rem;" onclick="openDirectPrompt('decision_tree')">
+                &#128198; Arbre décisionnel
+            </button>
+            <button class="btn-tool" style="padding:0.75rem;" onclick="openDirectPrompt('interactive_graph')">
+                &#128202; Graphique survie
+            </button>
+            <button class="btn-tool" style="padding:0.75rem;" onclick="openDirectPrompt('timeline')">
+                &#128197; Timeline essais
+            </button>
+        </div>
+        <div id="directPromptResult" style="margin-top:1rem;display:none;"></div>
+<footer>
+  DermatoRAG v2.0 · Usage pédagogique uniquement · Basé sur la littérature médicale indexée
+</footer>
+
+<script>
+var currentCourseTitle = "";
+var SECTIONS_MAP = {
+  "Épidémiologie et Introduction": "s1",
+  "Physiopathologie et Génétique": "s2",
+  "Présentation Clinique": "s3",
+  "Diagnostic": "s4",
+  "Traitement": "s5",
+  "Surveillance et Suivi": "s6",
+  "Cas Particuliers et Situations Spéciales": "s7"
+};
+var progressInterval = null;
+
+function toggleCollapse(el) {
+  el.classList.toggle("open");
+  el.nextElementSibling.classList.toggle("open");
+}
+
+function getSelectedSections() {
+  var sections = [];
+  for (var name in SECTIONS_MAP) {
+    var id = SECTIONS_MAP[name];
+    var el = document.getElementById(id);
+    if (el && el.checked) sections.push(name);
+  }
+  return sections;
+}
+
+function buildSteps() {
+  var steps = ["Connexion à la base de littérature…"];
+  var names = getSelectedSections();
+  for (var i = 0; i < names.length; i++) {
+    steps.push("Rédaction section " + (i+1) + "/" + names.length + " — " + names[i].substring(0,25) + "…");
+  }
+  steps.push("Génération de la bibliographie…", "Mise en page PDF…", "Finalisation…");
+  return steps;
+}
+
+function startProgress() {
+  var bar = document.getElementById("progressBar");
+  var status = document.getElementById("progressStatus");
+  var steps = buildSteps();
+  var step = 0;
+  var pct = 2;
+  bar.style.width = pct + "%";
+  status.textContent = steps[0];
+  if (progressInterval) clearInterval(progressInterval);
+  progressInterval = setInterval(function() {
+    step++;
+    if (step < steps.length) {
+      pct = Math.min(2 + (step / steps.length) * 88, 90);
+      bar.style.width = pct + "%";
+      status.textContent = steps[step];
+    }
+  }, 20000);
+}
+
+function stopProgress(success) {
+  clearInterval(progressInterval);
+  var bar = document.getElementById("progressBar");
+  var status = document.getElementById("progressStatus");
+  bar.style.width = "100%";
+  bar.style.background = success
+    ? "linear-gradient(90deg, #27ae60, #2ecc71)"
+    : "linear-gradient(90deg, #c0392b, #e74c3c)";
+  status.textContent = success ? "Cours généré avec succès !" : "Erreur lors de la génération";
+  setTimeout(function() {
+    document.getElementById("progressContainer").style.display = "none";
+  }, 2500);
+}
+
+async function generateCourse() {
+  var title = document.getElementById("courseTitle").value.trim();
+  if (!title) { document.getElementById("courseTitle").focus(); return; }
+  currentCourseTitle = title;
+
+  var level = document.getElementById("level").value;
+  var detailLevel = document.getElementById("detailLevel").value;
+  var tone = document.getElementById("tone").value;
+  var extraInstructions = document.getElementById("extraInstructions").value.trim();
+  var sectionsEnabled = getSelectedSections();
+  var noRedundancy = document.getElementById("noRedundancy").checked;
+  var focusTreatment = document.getElementById("focusTreatment").checked;
+  var keyPoints = document.getElementById("keyPoints").checked;
+  var clinicalCases = document.getElementById("clinicalCases").checked;
+  var qcm = document.getElementById("qcm").checked;
+
+  var btn = document.getElementById("generateBtn");
+  var errorBox = document.getElementById("errorBox");
+  var resultCard = document.getElementById("resultCard");
+  var progressContainer = document.getElementById("progressContainer");
+  var progressBar = document.getElementById("progressBar");
+
+  errorBox.style.display = "none";
+  resultCard.style.display = "none";
+  progressBar.style.background = "linear-gradient(90deg, var(--gold), var(--gold-light))";
+  btn.disabled = true;
+  btn.innerHTML = '<div class="spinner"></div><span>Génération en cours…</span>';
+  progressContainer.style.display = "block";
+
+  startProgress();
+
+  try {
+    var resp = await fetch("/generate-course", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({
+        course_title: title,
+        level: level,
+        sections_enabled: sectionsEnabled,
+        detail_level: detailLevel,
+        tone: tone,
+        extra_instructions: extraInstructions,
+        no_redundancy: noRedundancy,
+        focus_treatment_evidence: focusTreatment,
+        include_key_points: keyPoints,
+        include_clinical_cases: clinicalCases,
+        include_qcm: qcm
+      })
+    });
+
+    if (!resp.ok) {
+      var err = await resp.json();
+      throw new Error(err.detail || "HTTP " + resp.status);
+    }
+
+    var data = await resp.json();
+    stopProgress(true);
+
+    var statsRow = document.getElementById("statsRow");
+    var stats = [
+      ["Sections", data.sections_count],
+      ["Sources", data.sources_count],
+      ["Temps", data.generation_time_s + "s"],
+      ["Caractères", Math.round((data.markdown||"").length/1000) + "k"]
+    ];
+    statsRow.innerHTML = "";
+    for (var i = 0; i < stats.length; i++) {
+      var div = document.createElement("div");
+      div.className = "stat";
+      div.innerHTML = '<div class="stat-value">' + stats[i][1] + '</div><div class="stat-label">' + stats[i][0] + '</div>';
+      statsRow.appendChild(div);
+    }
+
+    var dlBtn = document.getElementById("downloadBtn");
+    dlBtn.href = data.pdf_url;
+    dlBtn.download = data.pdf_filename;
+    document.getElementById("coursePreview").textContent = data.markdown || "";
+    resultCard.style.display = "block";
+    resultCard.scrollIntoView({behavior:"smooth", block:"start"});
+
+  } catch(e) {
+    stopProgress(false);
+    errorBox.textContent = "Erreur : " + e.message;
+    errorBox.style.display = "block";
+  } finally {
+    btn.disabled = false;
+    btn.innerHTML = "<span>&#10024; Générer le cours</span>";
+  }
+}
+
+function openEvidenceModal() {
+  if (!currentCourseTitle) { alert("Génère d'abord un cours pour utiliser cet outil."); return; }
+  document.getElementById("evidenceModal").classList.add("open");
+  document.getElementById("evidenceQuestion").value = "";
+  document.getElementById("evidenceResult").innerHTML = "";
+}
+
+function closeEvidenceModal() {
+  document.getElementById("evidenceModal").classList.remove("open");
+}
+
+async function askEvidence() {
+  var question = document.getElementById("evidenceQuestion").value.trim();
+  if (!question) return;
+  var resultDiv = document.getElementById("evidenceResult");
+  resultDiv.innerHTML = '<div style="text-align:center;padding:2rem;"><div class="spinner" style="margin:0 auto;"></div><p style="margin-top:0.8rem;color:var(--gray);font-size:0.9rem;">Recherche en cours…</p></div>';
+  try {
+    var resp = await fetch("/ask-evidence", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({question: question, course_title: currentCourseTitle})
+    });
+    var data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Erreur");
+    var sources = (data.sources_used || []).map(function(s) {
+      return "<span>" + s.replace(".pdf","").replace(/_/g," ").substring(0,60) + "</span>";
+    }).join("");
+    resultDiv.innerHTML = '<div class="evidence-answer">' + data.answer.replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</div>' +
+      (sources ? '<div class="evidence-sources" style="margin-top:0.8rem;">Sources : ' + sources + '</div>' : '');
+  } catch(e) {
+    resultDiv.innerHTML = '<p style="color:#e74c3c;margin-top:1rem;">Erreur : ' + e.message + '</p>';
+  }
+}
+
+function openNotebookLModal() {
+  if (!currentCourseTitle) { alert("Génère d'abord un cours pour utiliser cet outil."); return; }
+  document.getElementById("notebooklmModal").classList.add("open");
+  document.getElementById("notebooklmResult").innerHTML = "";
+  document.getElementById("nbFocus").value = "";
+}
+
+function closeNotebookLModal() {
+  document.getElementById("notebooklmModal").classList.remove("open");
+}
+
+async function generateNotebookLMPrompt() {
+  var promptType = document.querySelector('input[name="nbType"]:checked').value;
+  var focus = document.getElementById("nbFocus").value.trim();
+  var resultDiv = document.getElementById("notebooklmResult");
+  resultDiv.innerHTML = '<div style="text-align:center;padding:2rem;"><div class="spinner" style="margin:0 auto;"></div><p style="margin-top:0.8rem;color:var(--gray);font-size:0.9rem;">Génération du prompt…</p></div>';
+  try {
+    var resp = await fetch("/generate-notebooklm-prompt", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      body: JSON.stringify({course_title: currentCourseTitle, prompt_type: promptType, focus: focus})
+    });
+    var data = await resp.json();
+    if (!resp.ok) throw new Error(data.detail || "Erreur");
+    var trials = (data.trials_found || []).length;
+    var trialsHtml = trials ? '<p style="font-size:0.8rem;color:var(--gray);margin-top:0.5rem;">' + trials + ' essai(s) clinique(s) identifié(s)</p>' : '';
+    var textareaId = "nbPromptArea";
+    resultDiv.innerHTML = '<textarea id="' + textareaId + '" readonly>' + data.notebooklm_prompt.replace(/</g,"&lt;").replace(/>/g,"&gt;") + '</textarea><div class="modal-actions"><button class="btn-modal primary" onclick="navigator.clipboard.writeText(document.getElementById(\x27\x27 + textareaId + \x27\x27).value)">&#128203; Copier</button></div>' + trialsHtml;
+  } catch(e) {
+    resultDiv.innerHTML = '<p style="color:#e74c3c;margin-top:1rem;">Erreur : ' + e.message + '</p>';
+  }
+}
+
+function togglePreview() {
+  var preview = document.getElementById("coursePreview");
+  var isHidden = preview.style.display === "none" || !preview.style.display;
+  preview.style.display = isHidden ? "block" : "none";
+}
+
+document.getElementById("courseTitle").addEventListener("keydown", function(e) {
+  if (e.key === "Enter") generateCourse();
+});
+
+var overlays = document.querySelectorAll(".modal-overlay");
+for (var i = 0; i < overlays.length; i++) {
+  overlays[i].addEventListener("click", function(e) {
+    if (e.target === this) this.classList.remove("open");
+  });
+}
+
+function openDirectPrompt(type) {
+    var courseTitle = document.getElementById("courseTitle").value.trim();
+    if (!courseTitle) { alert("Veuillez saisir un titre de cours"); return; }
+    var focus = "";
+    var modal = document.getElementById("notebooklmModal");
+    var resultDiv = document.getElementById("directPromptResult");
+    resultDiv.style.display = "block";
+    resultDiv.innerHTML = '<div style="text-align:center;padding:2rem;"><div class="spinner" style="margin:0 auto;"></div><p style="margin-top:1rem;color:var(--gray);">Génération du prompt '+type+'...</p></div>';
+    
+    var promptTypeMap = {"decision_tree":"Arbre décisionnel","interactive_graph":"Graphique interactif","timeline":"Timeline"};
+    document.getElementById("notebookLMLabel").innerHTML = "&#128200; Prompt "+promptTypeMap[type]+" — "+courseTitle;
+    document.getElementById("notebookLMDesc").innerHTML = "Prompt NotebookLM prêt à copier-coller dans <a href='https://notebooklm.google.com' target='_blank'>NotebookLM</a> pour générer un "+promptTypeMap[type].toLowerCase()+". Le contenu sera généré automatiquement par l'IA de Google.";
+    document.getElementById("nbPromptArea").value = "Génération en cours...";
+    
+    fetch("/notebooklm-only", {
+        method: "POST",
+        headers: {"Content-Type":"application/json"},
+        body: JSON.stringify({course_title: courseTitle, prompt_type: type, focus: focus})
+    })
+    .then(function(resp) { return resp.json(); })
+    .then(function(data) {
+        var trials = data.trials_found || [];
+        var trialsHtml = trials.length ? "<p style='font-size:0.8rem;color:var(--gray);margin-top:0.5rem;'>"+trials.length+" essai(s) clinique(s) identifié(s)</p>" : "";
+        var textareaId = "nbPromptArea";
+        resultDiv.style.display = "none";
+        document.getElementById("nbPromptArea").value = data.notebooklm_prompt;
+        modal.style.display = "block";
+        var copyBtn = document.querySelector("#notebookLModal .btn-modal");
+        if (copyBtn) {
+            copyBtn.setAttribute("onclick","navigator.clipboard.writeText(document.getElementById('"+textareaId+"').value)");
+        }
+    })
+    .catch(function(e) {
+        resultDiv.innerHTML = "<p style='color:#ff6b6b;padding:1rem;'>Erreur : "+e.message+"</p>";
+    });
+}
+
+</script>
+</body>
+</html>

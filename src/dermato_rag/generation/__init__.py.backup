@@ -1,0 +1,138 @@
+from langchain_google_genai import ChatGoogleGenerativeAI
+from langchain_core.messages import HumanMessage, SystemMessage
+from typing import List, Dict, Any, Tuple
+from ..config import config
+
+SECTIONS = [
+    ("Épidémiologie et Introduction", "épidémiologie incidence prévalence facteurs de risque définition"),
+    ("Physiopathologie et Génétique", "physiopathologie mécanisme moléculaire voie de signalisation mutation génétique"),
+    ("Présentation Clinique", "présentation clinique signes symptômes aspect macroscopique lésion clinique"),
+    ("Diagnostic", "diagnostic critères histologie anatomopathologie bilan dermoscopie staging classification"),
+    ("Traitement", "traitement chirurgie chimiothérapie immunothérapie radiothérapie thérapie ciblée protocole"),
+    ("Surveillance et Suivi", "surveillance suivi récidive réponse toxicité effets secondaires qualité de vie"),
+    ("Cas Particuliers et Situations Spéciales", "cas particulier situation spéciale immunodéprimé grossesse sujet âgé"),
+]
+
+SYSTEM_PROMPT = """Tu es un dermatologue expert de niveau hospitalo-universitaire, auteur de cours de DES (Diplôme d'Études Spécialisées) de Dermatologie.
+Tu rédiges un cours académique complet, rigoureux, exhaustif, de niveau DES.
+
+Règles absolues :
+- AUCUNE restriction de longueur — chaque section doit être complète et détaillée (minimum 600 mots)
+- Utilise IMPÉRATIVEMENT les informations des chunks fournis
+- Cite les sources dans le texte sous la forme (Auteur et al., Année) ou (Auteur, Année)
+- Écris en français médical académique, avec la terminologie exacte
+- Structure avec des sous-sections (##, ###) et des listes quand approprié
+- Ne jamais écrire "je ne peux pas" ou raccourcir le contenu
+- Le cours doit être directement utilisable pour la préparation au DES
+"""
+
+
+class CourseGenerator:
+    def __init__(self, api_key: str = None, model: str = "gemini-2.5-flash"):
+        self.api_key = api_key or config.GOOGLE_API_KEY
+        self.model_name = model
+        self.llm = ChatGoogleGenerativeAI(
+            model=self.model_name,
+            google_api_key=self.api_key,
+            temperature=0.3,
+            max_output_tokens=8192,
+        )
+
+    def _extract_citation_key(self, source: str) -> str:
+        """Extrait le nom de fichier comme clé de citation"""
+        import re
+        name = source.replace('.pdf', '').replace('_', ' ')
+        # Try to extract author + year
+        match = re.search(r'([A-Z][a-z]+(?:\s+et\s+al\.?)?).*?(\d{4})', name)
+        if match:
+            return f"{match.group(1)}, {match.group(2)}"
+        return name[:50]
+
+    def generate_section(self, section_title: str, chunks: List[Dict], course_title: str, level: str = "DES") -> str:
+        context = ""
+        for i, chunk in enumerate(chunks[:15]):
+            source = chunk.get('source', 'Source inconnue')
+            text = chunk.get('text', '')
+            citation_key = self._extract_citation_key(source)
+            context += f"\n[Source {i+1}: {citation_key}]\n{text}\n"
+
+        prompt = f"""
+{SYSTEM_PROMPT}
+
+Cours : {course_title}
+Section à rédiger : {section_title}
+Niveau : {level}
+
+DONNÉES DE LA LITTÉRATURE À INTÉGRER :
+{context}
+
+Rédige maintenant la section "{section_title}" de manière exhaustive et complète.
+Utilise les données ci-dessus et cite les sources dans le texte.
+Commence directement par le contenu (pas de préambule).
+"""
+        messages = [HumanMessage(content=prompt)]
+        response = self.llm.invoke(messages)
+        return response.content
+
+    def generate_bibliography(self, all_chunks: List[Dict]) -> str:
+        """Génère la bibliographie à partir des chunks utilisés"""
+        seen = set()
+        bib_lines = ["# Bibliographie\n"]
+        idx = 1
+        for chunk in all_chunks:
+            source = chunk.get('source', '')
+            if source and source not in seen:
+                seen.add(source)
+                citation_key = self._extract_citation_key(source)
+                bib_lines.append(f"{idx}. {source.replace('.pdf', '')}")
+                idx += 1
+        return '\n'.join(bib_lines)
+
+    def generate_full_course(self, course_title: str, retriever=None, level: str = "DES") -> Tuple[str, int, int]:
+        """
+        Génère un cours complet avec toutes les sections.
+        Returns: (markdown_content, sections_count, sources_count)
+        """
+        full_markdown = f"# {course_title}\n\n"
+        full_markdown += f"*Cours de niveau {level} — Généré par DermatoRAG*\n\n---\n\n"
+
+        all_chunks = []
+        sections_generated = 0
+
+        for section_title, keywords in SECTIONS:
+            print(f"Génération section: {section_title}...", flush=True)
+
+            # Retrieve relevant chunks
+            chunks = []
+            if retriever:
+                try:
+                    results1 = retriever.search(f"{course_title} {keywords}", top_k=10)
+                    results2 = retriever.search(f"{section_title} dermatologie {course_title}", top_k=8)
+                    # Deduplicate
+                    seen_texts = set()
+                    for r in results1 + results2:
+                        txt = r.get('text', '')[:100]
+                        if txt not in seen_texts:
+                            chunks.append(r)
+                            seen_texts.add(txt)
+                    chunks = chunks[:15]
+                except Exception as e:
+                    print(f"Retrieval error: {e}", flush=True)
+
+            all_chunks.extend(chunks)
+
+            section_content = self.generate_section(section_title, chunks, course_title, level)
+            full_markdown += f"# {section_title}\n\n{section_content}\n\n"
+            sections_generated += 1
+
+        # Bibliography
+        full_markdown += "\n" + self.generate_bibliography(all_chunks)
+
+        # Count unique sources
+        unique_sources = len(set(c.get('source', '') for c in all_chunks if c.get('source')))
+
+        return full_markdown, sections_generated, unique_sources
+
+    # Legacy method kept for compatibility
+    def generate(self, query: str, context_chunks: List[Dict], course_title: str) -> str:
+        return self.generate_section(course_title, context_chunks, course_title)

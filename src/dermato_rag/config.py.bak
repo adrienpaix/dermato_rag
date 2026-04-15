@@ -1,0 +1,19 @@
+import os
+from pathlib import Path
+from dotenv import load_dotenv
+
+load_dotenv(Path("/opt/dermato_rag/.env"))
+
+class Config:
+    GOOGLE_API_KEY = os.getenv('GOOGLE_API_KEY', '')
+    COHERE_API_KEY = os.getenv('COHERE_API_KEY', '')
+    QDRANT_URL = os.getenv('QDRANT_URL', 'http://localhost:6333')
+    COLLECTION_NAME = os.getenv('COLLECTION_NAME', 'dermato_rag')
+    DATA_DIR = Path(os.getenv('DATA_DIR', '/root/dermato_upload/Onco'))
+    CHUNK_SIZE = int(os.getenv('CHUNK_SIZE', 1000))
+    CHUNK_OVERLAP = int(os.getenv('CHUNK_OVERLAP', 100))
+    TOP_K_RETRIEVAL = int(os.getenv('TOP_K_RETRIEVAL', 20))
+    TOP_K_RERANK = int(os.getenv('TOP_K_RERANK', 5))
+    EMBEDDING_MODEL = os.getenv('EMBEDDING_MODEL', 'BAAI/bge-m3')
+
+config = Config()

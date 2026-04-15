@@ -1,0 +1,92 @@
+from qdrant_client import QdrantClient
+from qdrant_client.models import Distance, VectorParams, PointStruct, Filter, FieldCondition, MatchValue
+import numpy as np
+from typing import List, Dict, Any
+from ..config import config
+from ..embeddings import embedding_manager
+
+class QdrantRetriever:
+    def __init__(self, qdrant_url: str = None, collection_name: str = None):
+        self.qdrant_url = qdrant_url or config.QDRANT_URL
+        self.collection_name = collection_name or config.COLLECTION_NAME
+        self.client = QdrantClient(self.qdrant_url, check_compatibility=False)
+        self.embedding_manager = embedding_manager
+    
+    def ensure_collection(self, vector_size: int = 1024):
+        """Crée la collection si elle n'existe pas."""
+        collections = self.client.get_collections()
+        existing = any(c.name == self.collection_name for c in collections.collections)
+        if not existing:
+            self.client.create_collection(
+                collection_name=self.collection_name,
+                vectors_config=VectorParams(size=vector_size, distance=Distance.COSINE),
+            )
+            print(f"Collection '{self.collection_name}' créée.")
+        else:
+            print(f"Collection '{self.collection_name}' existe déjà.")
+    
+    def index_documents(self, chunks: List[Dict[str, Any]], embeddings: np.ndarray):
+        """Indexe les documents avec leurs embeddings dans Qdrant."""
+        if len(chunks) != len(embeddings):
+            raise ValueError("Nombre de chunks et d'embeddings différent.")
+        
+        # Vérifier la taille des vecteurs
+        vector_size = embeddings.shape[1]
+        self.ensure_collection(vector_size)
+        
+        points = []
+        for idx, (chunk, embedding) in enumerate(zip(chunks, embeddings)):
+            point = PointStruct(
+                id=idx,
+                vector=embedding.tolist(),
+                payload={
+                    "text": chunk["text"],
+                    "source": chunk["source"],
+                    "page": chunk["page"],
+                    "chunk_id": chunk["chunk_id"],
+                    "title": chunk["title"]
+                }
+            )
+            points.append(point)
+        
+        # Upsert par lots de 100
+        batch_size = 100
+        for i in range(0, len(points), batch_size):
+            batch = points[i:i+batch_size]
+            self.client.upsert(collection_name=self.collection_name, points=batch)
+            print(f"Indexé {i + len(batch)}/{len(points)} documents.")
+        
+        print(f"Indexation terminée. {len(points)} documents indexés.")
+    
+    def search(self, query: str, top_k: int = None) -> List[Dict[str, Any]]:
+        """Recherche les chunks les plus pertinents pour la requête."""
+        top_k = top_k or config.TOP_K_RETRIEVAL
+        query_embedding = self.embedding_manager.encode_query(query)
+        results = self.client.query_points(
+            collection_name=self.collection_name,
+            query=query_embedding.tolist(),
+            limit=top_k
+        )
+        chunks = []
+        for hit in results.points:
+            chunks.append({
+                "text": hit.payload["text"] if hit.payload else "",
+                "source": hit.payload.get("source", "") if hit.payload else "",
+                "page": hit.payload.get("page", 0) if hit.payload else 0,
+                "chunk_id": hit.payload.get("chunk_id", "") if hit.payload else "",
+                "title": hit.payload.get("title", "") if hit.payload else "",
+                "score": hit.score
+            })
+        return chunks
+
+    def search_for_section(self, section_title: str, course_title: str, top_k: int = 15) -> List[Dict[str, Any]]:
+        """Recherche des chunks pertinents pour une section spécifique d'un cours."""
+        query = f"{course_title} {section_title}"
+        return self.search(query, top_k)
+    
+    def get_collection_info(self):
+        """Retourne des informations sur la collection."""
+        return self.client.get_collection(collection_name=self.collection_name)
+
+# Singleton pratique
+qdrant_retriever = QdrantRetriever()
