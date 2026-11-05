@@ -18,8 +18,10 @@ env/
 *.swp
 *.swo
 
-# Environment variables
+# Environment variables (backups compris : le dépôt est public)
 .env
+.env.*
+!.env.example
 
 # Data (documents sources et traitées)
 data/raw/*
@@ -41,3 +43,9 @@ Thumbs.db
 # Logs
 *.log
 logs/
+
+# Outils de l'équipe d'agents (voir CLAUDE.md)
+graphify-out/
+.unlazy/
+.unlazy-hook-state.json
+.claude/settings.local.json
